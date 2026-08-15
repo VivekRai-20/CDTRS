@@ -4,6 +4,65 @@
 
 This is the complete backend implementation for CDTRS V2. It is built with Python and FastAPI, stores data in PostgreSQL, enforces role-based access control, issues JWT bearer tokens for authentication, supports file uploads, sends in-app notifications, and exposes a full REST API for the PySide6 frontend to consume.
 
+```text
+==================================================
+CDTRS V2 — Live Backend Integration Details
+==================================================
+
+Backend Status:
+  LIVE and publicly accessible via Render
+
+API Base URL:
+  https://cdtrs.onrender.com/api/v1
+
+Swagger Documentation:
+  https://cdtrs.onrender.com/docs
+
+Authentication Method:
+  JWT Bearer Token
+
+Login Endpoint:
+  POST https://cdtrs.onrender.com/api/v1/auth/login
+
+Authorization Header:
+  Authorization: Bearer <access_token>
+
+Test Accounts:
+  - DS:        username: ds_user     | password: cdtrs@ds
+  - DIRECTOR:  username: director    | password: cdtrs@director
+  - HOD:       username: hod_finance | password: cdtrs@hod
+  - EMPLOYEE:  username: emp_rahul   | password: cdtrs@emp
+
+Frontend Integration:
+  - Use the API Base URL above for all API requests.
+  - Do NOT use localhost for the deployed backend.
+  - Login first to obtain the JWT access token.
+  - Include the JWT token in the Authorization header
+    for protected endpoints.
+
+Example:
+  Authorization: Bearer <access_token>
+
+Role-Based Access:
+  DS
+  DIRECTOR
+  HOD
+  EMPLOYEE
+
+API Documentation:
+  Swagger contains the complete list of available endpoints,
+  request formats, response formats, and authentication requirements.
+
+Additional Documentation:
+  Full frontend integration code examples, service layer
+  templates, and error handling patterns are documented in:
+
+  backend/readme.md
+  Section 22 — Frontend Integration
+
+==================================================
+```
+
 ---
 
 # 1. Current Backend Structure
@@ -2149,16 +2208,73 @@ You **only** need:
 
 ## 22.2 Connection Information
 
-| Item | Value |
-|---|---|
-| API Base URL | `http://localhost:8000/api/v1` |
-| Swagger UI | `http://localhost:8000/docs` |
-| Health Check | `http://localhost:8000/health` |
-| Auth Method | JWT Bearer Token |
-| Token Lifetime | 60 minutes |
-| CORS | All origins allowed (development) |
+```text
+==================================================
+CDTRS V2 — Live Backend Integration Details
+==================================================
 
-> When the backend is deployed to a remote server, replace `localhost:8000` with the deployed server URL.
+Backend Status:
+  LIVE and publicly accessible via Render
+
+API Base URL:
+  https://cdtrs.onrender.com/api/v1
+
+Swagger Documentation:
+  https://cdtrs.onrender.com/docs
+
+Authentication Method:
+  JWT Bearer Token
+
+Login Endpoint:
+  POST https://cdtrs.onrender.com/api/v1/auth/login
+
+Authorization Header:
+  Authorization: Bearer <access_token>
+
+Test Accounts:
+  - DS:        username: ds_user     | password: cdtrs@ds
+  - DIRECTOR:  username: director    | password: cdtrs@director
+  - HOD:       username: hod_finance | password: cdtrs@hod
+  - EMPLOYEE:  username: emp_rahul   | password: cdtrs@emp
+
+Frontend Integration:
+  - Use the API Base URL above for all API requests.
+  - Do NOT use localhost for the deployed backend.
+  - Login first to obtain the JWT access token.
+  - Include the JWT token in the Authorization header
+    for protected endpoints.
+
+Example:
+  Authorization: Bearer <access_token>
+
+Role-Based Access:
+  DS
+  DIRECTOR
+  HOD
+  EMPLOYEE
+
+API Documentation:
+  Swagger contains the complete list of available endpoints,
+  request formats, response formats, and authentication requirements.
+
+Additional Documentation:
+  Full frontend integration code examples, service layer
+  templates, and error handling patterns are documented in:
+
+  backend/readme.md
+  Section 22 — Frontend Integration
+
+==================================================
+```
+
+| Item | Deployed Live Value | Local Development Value |
+|---|---|---|
+| API Base URL | `https://cdtrs.onrender.com/api/v1` | `http://localhost:8000/api/v1` |
+| Swagger UI | `https://cdtrs.onrender.com/docs` | `http://localhost:8000/docs` |
+| Health Check | `https://cdtrs.onrender.com/health` | `http://localhost:8000/health` |
+| Auth Method | JWT Bearer Token | JWT Bearer Token |
+| Token Lifetime | 60 minutes | 60 minutes |
+| CORS | All origins allowed | All origins allowed |
 
 ---
 
@@ -2168,7 +2284,7 @@ You **only** need:
 
 Send a POST request to:
 ```
-POST http://localhost:8000/api/v1/auth/login
+POST https://cdtrs.onrender.com/api/v1/auth/login
 Content-Type: application/json
 ```
 
@@ -2256,7 +2372,11 @@ PySide6 App
 ### `config.py`
 
 ```python
-API_BASE_URL = "http://localhost:8000/api/v1"
+# Live Deployed Backend URL (Render)
+API_BASE_URL = "https://cdtrs.onrender.com/api/v1"
+
+# Local Development Fallback
+# API_BASE_URL = "http://localhost:8000/api/v1"
 ```
 
 Change only this one line when the backend is deployed.
