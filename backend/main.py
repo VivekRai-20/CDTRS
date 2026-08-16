@@ -25,13 +25,57 @@ import crud
 
 from database import engine, get_db
 from models import UserRole, AttachmentType, SourceType, Priority
+from sqlalchemy import inspect, text
 
 
 # =========================================================
-# DATABASE TABLE CREATION
+# DATABASE TABLE CREATION & AUTOMATIC V1->V2 MIGRATION
 # =========================================================
 
-models.Base.metadata.create_all(bind=engine)
+def ensure_v2_schema():
+    """
+    Detects if an outdated V1 table (missing 'received_date' or 'version') exists.
+    If so, drops the outdated tables and creates the complete V2 schema automatically.
+    """
+    try:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+
+        if "documents" in tables:
+            columns = [c["name"] for c in inspector.get_columns("documents")]
+            if "received_date" not in columns or "version" not in columns:
+                print("Detected outdated V1 documents schema. Dropping old tables to recreate clean V2 schema...")
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        DROP TABLE IF EXISTS 
+                            workflow_history, 
+                            notifications, 
+                            attachments, 
+                            progress_updates, 
+                            work_assignments, 
+                            document_routes, 
+                            document_remarks, 
+                            document_ocr, 
+                            document_extracted_fields, 
+                            routing_suggestions, 
+                            reminders, 
+                            documents CASCADE;
+                    """))
+                    conn.commit()
+                print("Outdated tables dropped successfully.")
+
+        if os.getenv("RESET_DB", "false").lower() == "true":
+            print("RESET_DB=true: Recreating all tables...")
+            models.Base.metadata.drop_all(bind=engine)
+
+        models.Base.metadata.create_all(bind=engine)
+        print("V2 Database schema verified and ready.")
+    except Exception as e:
+        print(f"Schema verification warning: {e}")
+        models.Base.metadata.create_all(bind=engine)
+
+
+ensure_v2_schema()
 
 
 # =========================================================
@@ -1235,15 +1279,63 @@ def get_dashboard(
 
 
 # =========================================================
-# STARTUP HOOK & SEED DATA
+# SYSTEM MAINTENANCE & SCHEMA RESET ENDPOINT
+# =========================================================
+
+@app.post(
+    f"{API_V1}/system/reset-db",
+    tags=["System"],
+    summary="Recreate clean V2 schema and re-seed all test accounts",
+)
+def reset_database(
+    db: Session = Depends(get_db),
+):
+    """
+    Emergency maintenance endpoint to clean outdated V1 tables on remote cloud DBs,
+    re-create clean V2 schema, and re-seed all test accounts.
+    """
+    with engine.connect() as conn:
+        conn.execute(text("""
+            DROP TABLE IF EXISTS 
+                workflow_history, 
+                notifications, 
+                attachments, 
+                progress_updates, 
+                work_assignments, 
+                document_routes, 
+                document_remarks, 
+                document_ocr, 
+                document_extracted_fields, 
+                routing_suggestions, 
+                reminders, 
+                documents,
+                incoming_messages,
+                employees,
+                users,
+                departments,
+                audit_logs CASCADE;
+        """))
+        conn.commit()
+
+    models.Base.metadata.create_all(bind=engine)
+    crud.seed_data(db)
+    return {"status": "success", "message": "Database reset to clean V2 schema and all test accounts seeded successfully."}
+
+
+# =========================================================
+# STARTUP HOOK & AUTO-SEED
 # =========================================================
 
 @app.on_event("startup")
 def on_startup():
-    if os.getenv("SEED_DB", "false").lower() == "true":
-        from database import SessionLocal
-        db = SessionLocal()
-        try:
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        user_count = db.query(models.User).count()
+        should_seed = os.getenv("SEED_DB", "false").lower() == "true" or user_count == 0
+        if should_seed:
             crud.seed_data(db)
-        finally:
-            db.close()
+    except Exception as e:
+        print(f"Startup seed notice: {e}")
+    finally:
+        db.close()
