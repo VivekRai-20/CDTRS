@@ -57,9 +57,9 @@ Documentation:
 
 ---
 
-# 1. Backend File Structure
+# 1. Backend Architecture & File Structure
 
-The backend strictly follows a **5-file modular architecture**:
+The CDTRS V2 backend strictly adheres to a **5-file modular architecture**:
 
 ```text
 backend/
@@ -72,201 +72,385 @@ backend/
 │
 ├── requirements.txt   ← Python package dependencies
 ├── .env.example       ← Environment variable template (copy to .env)
-└── README.md          ← Exhaustive technical documentation
+└── README.md          ← This file (comprehensive technical guide)
 ```
 
-### Module Responsibilities
+### Module Responsibilities Flow
 
 ```text
-database.py  →  PostgreSQL connection & session management
-     ↓
-models.py    →  Database table definitions & relationships (ORM)
-     ↓
-crud.py      →  Database operations, OCR, routing AI, reminders, live event bus
-     ↓
-schemas.py   →  Request/response data validation (Pydantic v2)
-     ↓
-main.py      →  FastAPI REST endpoints & WebSocket live stream
+database.py
+     ↓  Establishes PostgreSQL connection & session generator
+models.py
+     ↓  Defines 17 database tables, enums & relational mappings
+crud.py
+     ↓  Handles queries, mutations, OCR engine, routing AI, reminders, & WebSocket bus
+schemas.py
+     ↓  Validates request payloads and formats JSON responses (Pydantic v2)
+main.py
+     ↓  Exposes REST endpoints, WebSocket stream, role guards, and file handlers
 ```
 
 ---
 
 # 2. Technologies Used
 
-| Technology | Version | Purpose |
-|---|---|---|
-| **Python** | 3.10+ | Backend programming language |
-| **FastAPI** | 0.111+ | High-performance async REST & WebSocket API framework |
-| **Uvicorn** | 0.29+ | ASGI production server |
-| **SQLAlchemy** | 2.0+ | Relational ORM for PostgreSQL |
-| **PostgreSQL** | 14–16 | Relational database (Render / Neon / Local) |
-| **Pydantic** | 2.7+ | Request/response schema validation |
-| **bcrypt** | 4.0+ | Secure password hashing |
-| **python-jose[cryptography]** | 3.3+ | JWT token creation & cryptographic validation |
-| **python-multipart** | 0.0.9+ | Multipart/form-data file upload support |
-| **python-dotenv** | 1.0+ | Environment configuration management |
+| Technology | Purpose |
+|---|---|
+| **Python 3.10+** | Backend programming language |
+| **FastAPI** | High-performance async REST API & WebSocket framework. Auto-generates interactive Swagger & OpenAPI documentation. |
+| **Uvicorn** | Production-ready ASGI server with hot-reload for development. |
+| **SQLAlchemy 2.x** | Object-Relational Mapper (ORM) for PostgreSQL. |
+| **PostgreSQL 14–16** | Robust relational database. Tested on local PostgreSQL, Render PostgreSQL, and Neon.tech. |
+| **Pydantic v2** | Request validation and response serialization with strong type enforcement. |
+| **bcrypt** | Cryptographic password hashing (salt + hash). |
+| **python-jose[cryptography]** | Generates and verifies HMAC-SHA256 JWT bearer tokens. |
+| **python-multipart** | Enables `multipart/form-data` uploads for physical scan documents and progress attachments. |
+| **python-dotenv** | Loads `.env` configuration securely into environment variables. |
 
 ---
 
-# 3. Installation and Setup
+# 3. Installation and Local Setup
 
 ### Step 1 — Prerequisites
 - Python 3.10 or higher
-- PostgreSQL 14, 15, or 16
-- `pip`
+- PostgreSQL 14, 15, or 16 installed and running
+- `pip` package manager
 
-### Step 2 — Install Dependencies
+### Step 2 — Install Python Dependencies
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-### Step 3 — Configure Environment
+### Step 3 — Create Local Database
+Open `psql` or pgAdmin:
+```sql
+CREATE DATABASE cdtrs;
+```
+*(SQLAlchemy automatically creates all 17 tables on the first server startup).*
+
+### Step 4 — Configure Environment Variables
+Copy `.env.example` to `.env`:
 ```bash
 copy .env.example .env
 ```
-Edit `.env` and configure your database credentials:
+Edit `.env`:
 ```text
 DATABASE_URL=postgresql+psycopg2://postgres:YOUR_PASSWORD@localhost:5432/cdtrs
-SECRET_KEY=your-random-secret-key
+SECRET_KEY=cdtrs-super-secret-key-change-in-production
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+UPLOAD_DIR=./uploads
 SEED_DB=true
 ```
 
-### Step 4 — Run Local Development Server
+### Step 5 — Start Local Server
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-# 4. Core Architecture Principles
+# 4. Environment Variables Explained
 
-1. **Document-Centric Single Canonical Record:** One `document_id` survives the entire lifecycle. No separate DirectorDocument or HODDocument copies.
-2. **Routing is NOT Assignment:** DS routes documents to Director, HOD, or eligible Employee. HOD assigns specific employees within their department.
-3. **Suggestion is NOT Routing:** OCR and Routing Intelligence recommend departments/employees with confidence scores, but DS confirms the route.
-4. **Director Remarks are Independent:** Saving a remark (`PUT /director-remark`) does NOT trigger a route. Returning to DS (`POST /return-to-ds`) is an explicit workflow action.
-5. **HOD Remarks are Independent:** HOD can save remarks independently of assigning employees.
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+psycopg2://postgres:password@localhost:5432/cdtrs` | PostgreSQL connection string. Supports `postgres://`, `postgresql://`, and `postgresql+psycopg2://` formats automatically. |
+| `SECRET_KEY` | `cdtrs-super-secret-key...` | Cryptographic secret for signing JWT tokens. Change in production! |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | JWT token validity lifetime (in minutes). |
+| `UPLOAD_DIR` | `./uploads` | Storage directory for original documents and progress attachments. |
+| `SEED_DB` | `false` | When `true`, automatically inserts initial test accounts and departments on startup. |
+
+---
+
+# 5. Core Architectural Principles (V2)
+
+1. **Document-Centric Single Canonical Record:** There is only one document record (`documents.doc_id`). No separate DirectorDocument or HODDocument copies.
+2. **Routing $\neq$ Assignment:** DS decides where a document goes (`document_routes`). HOD delegates work to staff (`work_assignments`).
+3. **Suggestion $\neq$ Routing:** OCR and Routing Intelligence recommend departments and employees, but DS explicitly confirms all routes.
+4. **Director Remarks are Independent of Return:** Saving a Director remark (`PUT /director-remark`) is separate from the workflow transition of returning to DS (`POST /return-to-ds`).
+5. **HOD Remarks are Independent of Assignment:** HOD can save remarks independently of assigning employees.
 6. **Progress Updates are Append-Only:** Employee progress entries are never overwritten; full audit history is preserved.
-7. **Strict Scope Isolation:** Backend enforces role and department filters in SQL queries. Finance HOD cannot see Procurement documents (returns `403`/`404`).
+7. **Strict Scope Isolation:** Backend enforces role and department filters in SQL queries. Finance HOD cannot view Procurement documents (returns `403`/`404`).
 8. **Real-Time Event Driven:** WebSockets broadcast workflow transitions so PySide6 screens update automatically without manual refresh buttons.
 9. **Optimistic Concurrency Control:** `version` column prevents concurrent overwrite conflicts (`409 Conflict`).
 10. **Closed Means Closed:** Once closed by DS, normal workflow mutations are rejected.
 
 ---
 
-# 5. Database Schema & Models
+# 6. Database Design (17 Tables & Enums)
 
-CDTRS V2 models 17 distinct entities in `models.py`:
+## 6.1 Enums (Controlled Vocabulary)
 
-```
-+-------------------+       +-----------------------+
-|  IncomingMessage  | ----> |       Document        |
-+-------------------+       +-----------------------+
-                                |  |  |  |  |  |  |
-            +-------------------+  |  |  |  |  |  +-------------------+
-            |                      |  |  |  |  |                      |
-            v                      v  |  |  |  v                      v
-     +--------------+   +-------------+  |  | +---------------+  +-------------+
-     | DocumentRoute|   |WorkAssignmnt|  |  | |ProgressUpdate |  | DocumentOCR |
-     +--------------+   +-------------+  |  | +---------------+  +-------------+
-                                         |  |         |                 |
-                                         |  |         v                 v
-                                         |  |   +------------+   +-------------+
-                                         |  |   | Attachment |   |ExtractedFlds|
-                                         |  |   +------------+   +-------------+
-                                         |  |
-                                         v  v
-                           +----------------------+  +---------------------+
-                           |  RoutingSuggestion   |  |   DocumentRemark    |
-                           +----------------------+  +---------------------+
-```
+### `UserRole`
+- `DS` — Director Secretary (Document Intake, Routing, Follow-up, Closure).
+- `DIRECTOR` — The Director (Review, Remarks, Return to DS).
+- `HOD` — Head of Department (Department Remarks, Employee Assignment).
+- `EMPLOYEE` — Staff member (Task execution, Progress updates, File uploads).
 
-### Table Overview
+### `DocumentStatus` (User-Facing Status)
+- `RECEIVED` — Registered by DS.
+- `UNDER_DIRECTOR_REVIEW` — Sent to Director for review.
+- `DIRECTOR_REVIEW_COMPLETED` — Returned to DS by Director.
+- `UNDER_HOD_PROCESSING` — Routed to Department HOD.
+- `ASSIGNED_FOR_EXECUTION` — Assigned to Employee by HOD.
+- `IN_PROGRESS` — Employee submitted progress.
+- `PROGRESS_UPDATED` — Follow-up forwarded to Director.
+- `REVIEW_COMPLETED` — Director completed follow-up review.
+- `CLOSED` — Permanently closed by DS.
 
-| Table | Description |
-|---|---|
-| `departments` | Organization departments (`Administration`, `Finance`, `Procurement`, `Technical`). |
-| `employees` | Employee records linked to departments and user accounts. |
-| `users` | User accounts with role (`DS`, `DIRECTOR`, `HOD`, `EMPLOYEE`). |
-| `incoming_messages` | Mail intake items, source type, sender, external ID de-duplication. |
-| `documents` | Canonical document table with lifecycle status, stage, OCR status, and version. |
-| `document_routes` | Audit log of all DS routing actions. |
-| `work_assignments` | HOD to Employee work assignments. |
-| `progress_updates` | Employee free-text progress entries. |
-| `attachments` | File metadata, storage keys, SHA-256 checksums, and attachment types. |
-| `document_remarks` | Full historical audit trail of Director and HOD remarks. |
-| `document_ocr` | Full OCR text artifact, engine, confidence, and status. |
-| `document_extracted_fields` | Structured extracted key-values with DS-verification provenance. |
-| `routing_suggestions` | Advisory routing AI with confidence score, reasoning, and Director instruction alert. |
-| `reminders` | Action/deadline escalation reminders with recipient fallback logic. |
-| `workflow_history` | User-visible document event timeline. |
-| `audit_logs` | System, security, and authentication audit logs. |
-| `notifications` | User notifications with read/unread tracking. |
+### `WorkflowStage` (Internal Stage)
+- `DS`, `DIRECTOR`, `HOD`, `EMPLOYEE`, `CLOSED`.
+
+### `Priority`
+- `HIGH`, `MEDIUM`, `LOW`.
+
+### `RouteType`
+- `INITIAL_DIRECTOR_REVIEW`, `RETURN_TO_DS`, `POST_REVIEW_TO_HOD`, `POST_REVIEW_TO_EMPLOYEE`, `FOLLOW_UP_TO_DIRECTOR`.
+
+### `SourceType`
+- `OUTLOOK`, `GOVERNMENT_MAIL`, `MANUAL_UPLOAD`, `OTHER_APPROVED_SOURCE`.
+
+### `AttachmentType`
+- `ORIGINAL`, `EMAIL_ATTACHMENT`, `SUPPORTING_DOCUMENT`, `PROGRESS_ATTACHMENT`.
+
+### `OCRStatus`
+- `NONE`, `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`.
+
+### `RoutingSource`
+- `DOCUMENT_CONTENT`, `DIRECTOR_REMARK`, `SOURCE_METADATA`, `MANUAL`.
 
 ---
 
-# 6. Incoming Mail & Intake Pipeline
+## 6.2 Table Specifications
 
-Incoming messages from Outlook, Government Mail, or Manual Upload are ingested into `incoming_messages`:
+### 1. `departments`
+- `id` (Integer, PK)
+- `name` (String(100), Unique, Required)
+- `code` (String(20), Unique, Optional, e.g. `FIN`, `PROC`, `ADMIN`)
+- `is_active` (Boolean, default `true`)
+- `created_at` (DateTime)
+
+### 2. `employees`
+- `id` (Integer, PK)
+- `employee_code` (String(50), Unique, Required, e.g. `EMP-001`)
+- `full_name` (String(100), Required)
+- `department_id` (Integer, FK $\to$ `departments.id`)
+- `designation` (String(100), Required)
+- `user_id` (Integer, FK $\to$ `users.id`, Nullable)
+- `is_active` (Boolean, default `true`)
+
+### 3. `users`
+- `id` (Integer, PK)
+- `username` (String(50), Unique, Indexed)
+- `password_hash` (String(255), bcrypt hash)
+- `full_name` (String(100))
+- `role` (Enum `UserRole`)
+- `department_id` (Integer, FK $\to$ `departments.id`, Nullable)
+- `employee_id` (Integer, Nullable)
+- `is_active` (Boolean, default `true`)
+- `created_at` (DateTime), `updated_at` (DateTime)
+
+### 4. `incoming_messages`
+- `id` (Integer, PK)
+- `source_type` (Enum `SourceType`)
+- `external_message_id` (String(255), Unique, Indexed, de-duplication key)
+- `sender_name` (String(150))
+- `sender_email` (String(255))
+- `subject` (String(500))
+- `received_at` (DateTime)
+- `body_reference` (Text)
+- `has_attachments` (Boolean)
+- `processing_status` (Enum `MessageProcessingStatus`)
+- `created_at` (DateTime)
+
+### 5. `documents`
+- `doc_id` (Integer, PK)
+- `reference_no` (String(50), Unique, Indexed, e.g. `CDTRS-2026-0001`)
+- `title` (String(255))
+- `description` (Text, Nullable)
+- `received_date` (Date)
+- `deadline` (Date, Nullable)
+- `source` (String(255), Nullable)
+- `mode` (String(50))
+- `priority` (Enum `Priority`)
+- `status` (Enum `DocumentStatus`)
+- `current_stage` (Enum `WorkflowStage`)
+- `current_owner_id` (Integer, FK $\to$ `users.id`, Nullable)
+- `target_department_id` (Integer, FK $\to$ `departments.id`, Nullable)
+- `created_by` (Integer, FK $\to$ `users.id`)
+- `source_message_id` (Integer, FK $\to$ `incoming_messages.id`, Nullable)
+- `ocr_status` (Enum `OCRStatus`)
+- `version` (Integer, default 1, Optimistic Concurrency Control)
+- `director_remark` (Text, latest remark)
+- `hod_remark` (Text, latest remark)
+- `created_at` (DateTime), `updated_at` (DateTime), `closed_at` (DateTime, Nullable)
+
+### 6. `document_routes`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `from_user_id` (Integer, FK $\to$ `users.id`)
+- `to_user_id` (Integer, FK $\to$ `users.id`, Nullable)
+- `to_department_id` (Integer, FK $\to$ `departments.id`, Nullable)
+- `route_type` (Enum `RouteType`)
+- `remarks` (Text, Nullable)
+- `created_at` (DateTime)
+
+### 7. `work_assignments`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `assigned_by_user_id` (Integer, FK $\to$ `users.id`, HOD)
+- `assigned_to_user_id` (Integer, FK $\to$ `users.id`, Employee)
+- `instructions` (Text, Nullable)
+- `is_active` (Boolean, default `true`)
+- `assigned_at` (DateTime), `completed_at` (DateTime, Nullable)
+
+### 8. `progress_updates`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `submitted_by_user_id` (Integer, FK $\to$ `users.id`)
+- `description` (Text, free-text progress)
+- `created_at` (DateTime)
+
+### 9. `attachments`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `progress_update_id` (Integer, FK $\to$ `progress_updates.id`, Nullable)
+- `uploaded_by_user_id` (Integer, FK $\to$ `users.id`)
+- `file_name` (String(255))
+- `storage_key` (String(500), relative path on server)
+- `file_type` (String(100))
+- `file_size` (BigInteger)
+- `checksum` (String(64), SHA-256 integrity hash)
+- `attachment_type` (Enum `AttachmentType`)
+- `source_message_id` (Integer, FK $\to$ `incoming_messages.id`, Nullable)
+- `created_at` (DateTime)
+
+### 10. `document_remarks`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `author_user_id` (Integer, FK $\to$ `users.id`)
+- `role` (Enum `UserRole`)
+- `remark_text` (Text)
+- `remark_type` (Enum `RemarkType`: `DIRECTOR`, `HOD`)
+- `created_at` (DateTime), `updated_at` (DateTime)
+
+### 11. `document_ocr`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`, Unique)
+- `extracted_text` (Text)
+- `ocr_status` (Enum `OCRStatus`)
+- `ocr_engine` (String(100))
+- `confidence` (Float)
+- `processed_at` (DateTime, Nullable)
+- `error_message` (Text, Nullable)
+
+### 12. `document_extracted_fields`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `field_name` (String(100), e.g. `TITLE`, `REFERENCE_NO`, `DEADLINE`, `PRIORITY`)
+- `extracted_value` (Text)
+- `confidence` (Float)
+- `source_page` (Integer)
+- `source_text` (Text)
+- `verified_value` (Text, DS-verified value)
+- `verified_by` (Integer, FK $\to$ `users.id`, Nullable)
+- `verified_at` (DateTime, Nullable)
+
+### 13. `routing_suggestions`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`, Unique)
+- `suggested_department_id` (Integer, FK $\to$ `departments.id`, Nullable)
+- `suggested_employee_id` (Integer, FK $\to$ `users.id`, Nullable)
+- `routing_confidence` (Float)
+- `routing_reason` (Text)
+- `routing_source` (Enum `RoutingSource`)
+- `is_director_instruction` (Boolean, triggers alert banner for DS)
+- `generated_at` (DateTime)
+- `confirmed_by` (Integer, FK $\to$ `users.id`, Nullable)
+- `confirmed_at` (DateTime, Nullable)
+
+### 14. `reminders`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `recipient_user_id` (Integer, FK $\to$ `users.id`)
+- `reason` (Enum `ReminderReason`: `DUE_SOON`, `OVERDUE`, `ACTION_REQUIRED`)
+- `due_at` (DateTime, Nullable)
+- `sent_at` (DateTime)
+- `is_read` (Boolean)
+- `deduplication_key` (String(200), Unique, Indexed)
+
+### 15. `workflow_history`
+- `id` (Integer, PK)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`)
+- `performed_by_user_id` (Integer, FK $\to$ `users.id`)
+- `action` (String(150))
+- `from_role` (String(50)), `to_role` (String(50))
+- `details` (Text, Nullable)
+- `created_at` (DateTime)
+
+### 16. `audit_logs`
+- `id` (Integer, PK)
+- `user_id` (Integer, FK $\to$ `users.id`)
+- `action` (String(100))
+- `entity_type` (String(50)), `entity_id` (Integer)
+- `description` (Text)
+- `created_at` (DateTime)
+
+### 17. `notifications`
+- `id` (Integer, PK)
+- `user_id` (Integer, FK $\to$ `users.id`)
+- `document_id` (Integer, FK $\to$ `documents.doc_id`, Nullable)
+- `workflow_event_id` (Integer, FK $\to$ `workflow_history.id`, Nullable)
+- `title` (String(200)), `message` (Text)
+- `is_read` (Boolean)
+- `created_at` (DateTime)
+
+---
+
+# 7. Incoming Mail & Intake Pipeline
 
 ```text
-Incoming Mail / Upload
-         ↓
+Incoming Message / Scan
+          ↓
 De-duplication Check (external_message_id)
-         ↓
-Secure File Store + SHA-256 Checksum
-         ↓
-Canonical Document Created (status: RECEIVED, stage: DS)
-         ↓
+          ↓
+SHA-256 Checksum Computed + Saved in Storage
+          ↓
+Canonical Document Created (status: RECEIVED, stage: DS, version: 1)
+          ↓
 Asynchronous OCR Pipeline Triggered
 ```
 
-### Endpoints
-- `GET /api/v1/intake` — List all incoming intake items.
-- `POST /api/v1/intake/manual-upload` — Upload file + metadata directly into canonical document.
-- `POST /api/v1/intake/{id}/process` — Convert pending mail item into a tracked canonical document.
+- **Endpoints:**
+  - `GET /api/v1/intake` — List incoming mail items.
+  - `POST /api/v1/intake/manual-upload` — Upload file + metadata directly into canonical document.
+  - `POST /api/v1/intake/{id}/process` — Process pending intake item into a canonical document.
 
 ---
 
-# 7. OCR & Structured Extraction Pipeline
+# 8. OCR Extraction & Verification Pipeline
 
-OCR extracts text, identifies fields, and preserves DS-verified values:
-
-1. **Extraction:** Extracts `TITLE`, `REFERENCE_NO`, `SOURCE`, `PRIORITY`, and `DEADLINE`.
-2. **Provenance:** Each field stores raw extracted value, confidence score, source page, and source text snippet.
-3. **Verification:** When DS verifies/edits a field (`POST /documents/{id}/verify-field`), `verified_value`, `verified_by`, and `verified_at` are recorded.
+1. **Extraction:** Extracts structured text (`TITLE`, `REFERENCE_NO`, `SOURCE`, `PRIORITY`, `DEADLINE`).
+2. **Provenance:** Stores page numbers, confidence percentages, and supporting text snippets.
+3. **Verification:** DS verifies or edits values via `POST /documents/{id}/verify-field`.
 4. **Re-analysis Protection:** When re-running OCR (`POST /documents/{id}/reanalyze`), newly extracted values **never overwrite** DS-verified values.
 
-### Endpoints
-- `POST /api/v1/documents/{id}/process-ocr` — Trigger OCR extraction.
-- `GET /api/v1/documents/{id}/ocr` — Get full OCR text and extracted fields.
-- `POST /api/v1/documents/{id}/verify-field` — DS verifies or edits a structured field.
-- `POST /api/v1/documents/{id}/reanalyze` — Re-run OCR without overwriting verified fields.
-
 ---
 
-# 8. Routing Intelligence & Advisory Suggestions
+# 9. Routing Intelligence & Advisory Suggestions
 
-The backend analyzes OCR text, metadata, and Director remarks to generate advisory routing suggestions:
-
-- **Explicit Director Instruction Detection:** If Director remark contains *"Assign this to Rahul Sharma, Finance"*, the engine detects:
+- **Director Instruction Detection:** Scans Director remarks. If the Director wrote *"Assign this to Rahul Sharma, Finance"*, the engine detects:
   - `suggested_department = Finance`
   - `suggested_employee = Rahul Sharma`
-  - `routing_confidence = 95%`
-  - `is_director_instruction = true` (Triggers high-priority alert on DS UI)
-- **Content Keyword Matching:** Fallback matching on document title and body against department directories.
-- **Authority Rule:** Suggestions are purely advisory. No document routes until DS explicitly calls `POST /documents/{id}/route`.
-
-### Endpoints
-- `POST /api/v1/documents/{id}/analyze-routing` — Generate or recalculate routing suggestions.
-- `GET /api/v1/documents/{id}/routing-suggestion` — Retrieve current routing suggestion and confidence.
+  - `confidence = 95%`
+  - `is_director_instruction = true` (Triggers high-priority DS alert)
+- **Advisory Only:** No route changes occur until DS explicitly calls `POST /documents/{id}/route`.
 
 ---
 
-# 9. Reminders & Deadline Escalation
+# 10. Reminders & Deadline Escalation
 
-The reminder engine scans active documents and escalates action reminders:
-
+Escalation hierarchy:
 ```python
 if active_employee_assigned:
     recipient = assigned_employee
@@ -275,15 +459,12 @@ elif target_department_exists:
 else:
     recipient = ds_creator
 ```
-
-### Endpoints
-- `GET /api/v1/reminders` — List action/deadline reminders for logged-in user.
-- `POST /api/v1/reminders/check` — Trigger reminder scan and escalation.
-- `PATCH /api/v1/reminders/{id}/read` — Mark reminder as read.
+- **Deduplication:** Unique key per document, user, reason, and date prevents repeated spam.
+- **Endpoints:** `GET /api/v1/reminders`, `POST /api/v1/reminders/check`, `PATCH /api/v1/reminders/{id}/read`.
 
 ---
 
-# 10. Real-Time Live Events (WebSocket)
+# 11. Real-Time Live Events (WebSocket)
 
 PySide6 clients connect to the WebSocket endpoint for real-time push updates without manual polling or refresh buttons:
 
@@ -302,7 +483,7 @@ PySide6 clients connect to the WebSocket endpoint for real-time push updates wit
 
 ---
 
-# 11. Strict Scope & Multi-HOD Isolation
+# 12. Strict Scope & Multi-HOD Isolation
 
 The backend enforces query-level scoping:
 
@@ -313,104 +494,82 @@ The backend enforces query-level scoping:
 | **HOD** | Documents routed to HOD's specific department. | `403 Forbidden` / `404 Not Found` |
 | **EMPLOYEE** | Documents assigned or directly routed to employee. | `403 Forbidden` / `404 Not Found` |
 
-### Two-HOD Cross-Access Test
-- `hod_finance` logging in sees only Finance documents.
-- `hod_procurement` logging in sees only Procurement documents.
-- Requesting another department's document ID returns `403 Forbidden`.
-
----
-
-# 12. Complete Workflow Lifecycle Walkthrough
-
-```text
-1. Intake: DS receives document (POST /intake/manual-upload)
-      ↓
-2. OCR: Extracted text & fields generated (POST /documents/{id}/process-ocr)
-      ↓
-3. Routing Intelligence: Suggestion generated (POST /documents/{id}/analyze-routing)
-      ↓
-4. Initial Route: DS routes to Director (POST /documents/{id}/route)
-      ↓
-5. Director Review: Director saves remark (PUT /documents/{id}/director-remark)
-      ↓
-6. Return to DS: Director returns document (POST /documents/{id}/return-to-ds)
-      ↓
-7. Post-Review Route: DS routes to HOD (POST /documents/{id}/route)
-      ↓
-8. HOD Assignment: HOD assigns Employee (POST /documents/{id}/assign)
-      ↓
-9. Progress: Employee submits multiple updates (POST /documents/{id}/progress)
-   Attachments: Employee uploads supporting files (POST /documents/{id}/attachments)
-      ↓
-10. Follow-up: DS forwards progress to Director (POST /documents/{id}/follow-up)
-      ↓
-11. Final Review: Director returns to DS (POST /documents/{id}/return-to-ds)
-      ↓
-12. Closure: DS permanently closes document (POST /documents/{id}/close)
-```
-
 ---
 
 # 13. Consolidated API Reference
 
 ### Authentication
-- `POST /api/v1/auth/login` — Authenticate and receive JWT token.
-- `GET /api/v1/auth/me` — Get current logged-in user profile.
-- `POST /api/v1/auth/logout` — Logout.
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| POST | `/api/v1/auth/login` | Public | Login with username/password, returns JWT token |
+| GET | `/api/v1/auth/me` | All | Get profile of logged-in user |
+| POST | `/api/v1/auth/logout` | All | Logout (client discards token) |
 
-### Intake
-- `GET /api/v1/intake` — List incoming mail items.
-- `POST /api/v1/intake/manual-upload` — Manual file upload creating document.
-- `POST /api/v1/intake/{id}/process` — Process mail item into document.
+### Intake & Mail
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/api/v1/intake` | DS | List all incoming mail/intake items |
+| POST | `/api/v1/intake/manual-upload` | DS | Upload document file + metadata |
+| POST | `/api/v1/intake/{id}/process` | DS | Process intake item into canonical document |
 
 ### Documents
-- `POST /api/v1/documents` — Register new canonical document.
-- `GET /api/v1/documents` — List all documents (DS).
-- `GET /api/v1/documents/inbox` — Role-scoped inbox for active user.
-- `GET /api/v1/documents/{id}` — Get single document (Authorized).
-- `POST /api/v1/documents/{id}/route` — Route document to Director/HOD/Employee.
-- `PUT /api/v1/documents/{id}/director-remark` — Save/edit Director remark.
-- `POST /api/v1/documents/{id}/return-to-ds` — Return document to DS.
-- `PUT /api/v1/documents/{id}/hod-remark` — Save/edit HOD remark.
-- `POST /api/v1/documents/{id}/assign` — Assign employee (HOD).
-- `POST /api/v1/documents/{id}/progress` — Submit progress update (Employee).
-- `GET /api/v1/documents/{id}/progress` — List progress updates.
-- `POST /api/v1/documents/{id}/attachments` — Upload attachment (Multipart).
-- `GET /api/v1/documents/{id}/attachments` — List attachments.
-- `GET /api/v1/documents/{id}/remarks` — List remark history.
-- `POST /api/v1/documents/{id}/follow-up` — Forward follow-up to Director (DS).
-- `GET /api/v1/documents/{id}/history` — Document workflow history.
-- `POST /api/v1/documents/{id}/close` — Close document (DS).
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| POST | `/api/v1/documents` | DS | Register new document |
+| GET | `/api/v1/documents` | DS | Get all documents |
+| GET | `/api/v1/documents/inbox` | All | Role-scoped inbox for current user |
+| GET | `/api/v1/documents/{id}` | All | Get single document (Authorized) |
+| POST | `/api/v1/documents/{id}/route` | DS | Route document to Director/HOD/Employee |
+| PUT | `/api/v1/documents/{id}/director-remark` | DIRECTOR | Save/edit Director remark |
+| POST | `/api/v1/documents/{id}/return-to-ds` | DIRECTOR | Return document to DS |
+| PUT | `/api/v1/documents/{id}/hod-remark` | HOD | Save/edit HOD remark |
+| POST | `/api/v1/documents/{id}/assign` | HOD | Assign employee to document |
+| POST | `/api/v1/documents/{id}/progress` | EMPLOYEE | Submit progress update |
+| GET | `/api/v1/documents/{id}/progress` | All | Get progress updates |
+| POST | `/api/v1/documents/{id}/attachments` | All | Upload attachment file (Multipart) |
+| GET | `/api/v1/documents/{id}/attachments` | All | List attachments for document |
+| GET | `/api/v1/documents/{id}/remarks` | All | Get remark history |
+| POST | `/api/v1/documents/{id}/follow-up` | DS | Forward progress follow-up to Director |
+| GET | `/api/v1/documents/{id}/history` | All | Get workflow history |
+| POST | `/api/v1/documents/{id}/close` | DS | Permanently close document |
 
 ### OCR & Intelligence
-- `POST /api/v1/documents/{id}/process-ocr` — Trigger OCR extraction.
-- `GET /api/v1/documents/{id}/ocr` — Get OCR text & structured fields.
-- `POST /api/v1/documents/{id}/verify-field` — Verify/edit extracted field.
-- `POST /api/v1/documents/{id}/reanalyze` — Re-analyze without overwriting verified fields.
-- `POST /api/v1/documents/{id}/analyze-routing` — Generate routing suggestion.
-- `GET /api/v1/documents/{id}/routing-suggestion` — Get routing suggestion & confidence.
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| POST | `/api/v1/documents/{id}/process-ocr` | DS | Trigger OCR processing |
+| GET | `/api/v1/documents/{id}/ocr` | All | Get OCR text & structured fields |
+| POST | `/api/v1/documents/{id}/verify-field` | DS | Verify/edit extracted field |
+| POST | `/api/v1/documents/{id}/reanalyze` | DS | Re-run OCR preserving verified fields |
+| POST | `/api/v1/documents/{id}/analyze-routing` | DS | Generate routing suggestion |
+| GET | `/api/v1/documents/{id}/routing-suggestion` | All | Get current routing suggestion & confidence |
 
 ### Attachments
-- `GET /api/v1/attachments/{id}` — Attachment metadata.
-- `GET /api/v1/attachments/{id}/download` — Authorized streaming file download.
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/api/v1/attachments/{id}` | All | Get attachment metadata |
+| GET | `/api/v1/attachments/{id}/download` | All | Authorized streaming file download |
 
 ### Reminders & Notifications
-- `GET /api/v1/reminders` — User action reminders.
-- `POST /api/v1/reminders/check` — Trigger reminder scan.
-- `PATCH /api/v1/reminders/{id}/read` — Mark reminder as read.
-- `GET /api/v1/notifications` — All notifications.
-- `GET /api/v1/notifications/unread` — Unread notifications.
-- `PATCH /api/v1/notifications/{id}/read` — Mark notification as read.
-- `PATCH /api/v1/notifications/read-all` — Mark all notifications as read.
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/api/v1/reminders` | All | Get user action/deadline reminders |
+| POST | `/api/v1/reminders/check` | DS | Trigger reminder scan & escalation |
+| PATCH | `/api/v1/reminders/{id}/read` | All | Mark reminder as read |
+| GET | `/api/v1/notifications` | All | Get all notifications |
+| GET | `/api/v1/notifications/unread` | All | Get unread notifications |
+| PATCH | `/api/v1/notifications/{id}/read` | All | Mark notification as read |
+| PATCH | `/api/v1/notifications/read-all` | All | Mark all notifications as read |
 
 ### Dashboard & Events
-- `GET /api/v1/dashboard` — Role-specific metrics.
-- `WebSocket /api/v1/ws` — Real-time event stream.
-- `GET /api/v1/events/recent` — Recent events list.
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/api/v1/dashboard` | All | Get role-specific dashboard metrics |
+| WebSocket | `/api/v1/ws` | All | Real-time live event stream |
+| GET | `/api/v1/events/recent` | All | Polling fallback for recent events |
 
 ---
 
-# 14. How to Test Using Swagger UI
+# 14. How to Test Using Swagger UI (Step-by-Step)
 
 1. Open **`https://cdtrs.onrender.com/docs`** (or `http://localhost:8000/docs`).
 2. Go to **`POST /api/v1/auth/login`**, click **Try it out**, and enter:
@@ -420,13 +579,70 @@ The backend enforces query-level scoping:
      "password": "cdtrs@ds"
    }
    ```
-3. Copy the `access_token` string from the response.
-4. Click the green **Authorize 🔒** button at the top right, paste the token, and click **Authorize**.
-5. Test any endpoint (e.g. `POST /api/v1/documents`, `GET /api/v1/documents/inbox`).
+3. Click **Execute** and copy the `access_token` string from the response body.
+4. Click the green **Authorize 🔒** button at the top right of Swagger UI, paste the token, and click **Authorize**.
+5. All endpoints will now automatically include the bearer token in headers.
 
 ---
 
-# 15. Frontend Developer Integration Guide (PySide6)
+# 15. Complete End-to-End Workflow Test Sequence
+
+```text
+1. Login as DS (ds_user / cdtrs@ds) -> Authorize
+2. Create document -> POST /api/v1/documents
+3. View inbox -> GET /api/v1/documents/inbox
+4. Trigger OCR -> POST /api/v1/documents/1/process-ocr
+5. Verify fields -> POST /api/v1/documents/1/verify-field (e.g. TITLE = "Verified Title")
+6. Generate routing suggestion -> POST /api/v1/documents/1/analyze-routing
+7. Route to Director -> POST /api/v1/documents/1/route (route_type: INITIAL_DIRECTOR_REVIEW, to_user_id: 2)
+
+8. Login as Director (director / cdtrs@director) -> Authorize
+9. View Director inbox -> GET /api/v1/documents/inbox
+10. Save Director remark -> PUT /api/v1/documents/1/director-remark (director_remark: "Assign to Rahul Sharma, Finance")
+11. Return to DS -> POST /api/v1/documents/1/return-to-ds
+
+12. Login as DS -> Authorize
+13. View routing suggestion -> GET /api/v1/documents/1/routing-suggestion (Flags is_director_instruction=true)
+14. Route to Finance HOD -> POST /api/v1/documents/1/route (route_type: POST_REVIEW_TO_HOD, to_user_id: 3, to_department_id: 2)
+
+15. Login as Finance HOD (hod_finance / cdtrs@hod) -> Authorize
+16. View HOD inbox -> GET /api/v1/documents/inbox
+17. Save HOD remark -> PUT /api/v1/documents/1/hod-remark
+18. Assign Rahul -> POST /api/v1/documents/1/assign (assigned_to_user_id: 5)
+
+19. Login as Rahul (emp_rahul / cdtrs@emp) -> Authorize
+20. View Employee inbox -> GET /api/v1/documents/inbox
+21. Submit progress -> POST /api/v1/documents/1/progress (description: "Verification complete.")
+22. Upload attachment -> POST /api/v1/documents/1/attachments
+
+23. Login as DS -> Authorize
+24. Forward follow-up to Director -> POST /api/v1/documents/1/follow-up
+
+25. Login as Director -> Authorize
+26. Save final remark -> PUT /api/v1/documents/1/director-remark
+27. Return to DS -> POST /api/v1/documents/1/return-to-ds
+
+28. Login as DS -> Authorize
+29. Close document -> POST /api/v1/documents/1/close
+30. View complete workflow history -> GET /api/v1/documents/1/history
+```
+
+---
+
+# 16. Test Accounts (Seed Data)
+
+| Role | Department | Username | Password |
+|---|---|---|---|
+| **DS** | Administration | `ds_user` | `cdtrs@ds` |
+| **DIRECTOR** | Executive | `director` | `cdtrs@director` |
+| **HOD** | Finance | `hod_finance` | `cdtrs@hod` |
+| **HOD** | Procurement | `hod_procurement` | `cdtrs@hod` |
+| **EMPLOYEE** | Finance | `emp_rahul` | `cdtrs@emp` |
+| **EMPLOYEE** | Procurement | `emp_priya` | `cdtrs@emp` |
+
+---
+
+# 17. Frontend Developer Integration Guide (PySide6)
 
 ### `config.py`
 ```python
@@ -536,20 +752,5 @@ class RealtimeEventListener:
         if self.ws:
             self.ws.close()
 ```
-
----
-
-# 16. Test Credentials
-
-Seed data includes 2 distinct HODs and multiple employees:
-
-| Role | Department | Username | Password | Notes |
-|---|---|---|---|---|
-| `DS` | Administration | `ds_user` | `cdtrs@ds` | Document intake, routing, closure |
-| `DIRECTOR` | Executive | `director` | `cdtrs@director` | Document review, remarks, return to DS |
-| `HOD` | Finance | `hod_finance` | `cdtrs@hod` | Finance remarks, assignment |
-| `HOD` | Procurement | `hod_procurement` | `cdtrs@hod` | Procurement remarks, assignment |
-| `EMPLOYEE` | Finance | `emp_rahul` | `cdtrs@emp` | Rahul Sharma (Finance) |
-| `EMPLOYEE` | Procurement | `emp_priya` | `cdtrs@emp` | Priya Verma (Procurement) |
 
 ---
